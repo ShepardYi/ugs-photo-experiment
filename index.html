@@ -62,13 +62,14 @@
   }
 
   // ---------- Likert battery (your 8 items) ----------
-  const likertLabels = [
-    "1<br><small>Strongly disagree</small>",
-    "2",
-    "3<br><small>Neutral</small>",
-    "4",
-    "5<br><small>Strongly agree</small>"
-  ];
+const likertLabels = [
+  "1<br><small>Strongly disagree</small>",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6<br><small>Strongly agree</small>"
+];
 
   function buildLikertQuestions(){
     return [
@@ -190,6 +191,14 @@
           preamble: "<p><strong>Rate the image you just saw</strong></p>",
           questions: buildLikertQuestions(),
           randomize_question_order: false,
+		  on_finish: function(data) {
+			// Shift responses from 0–5 to 1–6
+			const shifted = {};
+			for (const key in data.response) {
+			  shifted[key] = data.response[key] + 1;
+			}
+			data.response = shifted;
+		  },		  
           data: {
             phase: "likert",
             image_order: i + 1,

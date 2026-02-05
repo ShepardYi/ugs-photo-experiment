@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>UGS Photo Experiment</title>
+
+  <!-- jsPsych v8 core -->
+  <script src="https://unpkg.com/jspsych@8.2.3"></script>
+  <link href="https://unpkg.com/jspsych@8.2.3/css/jspsych.css" rel="stylesheet" type="text/css" />
+
+  <!-- Plugins (v8-compatible) -->
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.0.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-image-button-response@2.0.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-survey-likert@2.0.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-survey-text@2.0.0"></script>
+
+  <style>
+    .jspsych-content { max-width: 900px; }
+    img { border-radius: 8px; }
+    pre { white-space: pre-wrap; font-family: monospace; color:#b00020; }
+  </style>
+</head>
+
+<body></body>
+
+<script>
+  // ---------- helpers ----------
+  function showFatal(msg){
+    document.body.innerHTML = "<pre>" + msg + "</pre>";
+  }
+
+  function sampleOne(arr){
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function shuffle(arr){
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  async function loadStimuli(){
+    const resp = await fetch("stimuli.json", { cache: "no-store" });
+    if (!resp.ok) throw new Error("Cannot load stimuli.json (check file location / server folder).");
+    return await resp.json();
+  }
+
+  function downloadCSV(text, filename){
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- Likert battery (your 8 items) ----------
+  const likertLabels = [
+    "1<br><small>Strongly disagree</small>",
+    "2",
+    "3<br><small>Neutral</small>",
+    "4",
+    "5<br><small>Strongly agree</small>"
+  ];
+
+  function buildLikertQuestions(){
+    return [
+      { prompt: "This type of space improves physical health.", labels: likertLabels, required: true },
+      { prompt: "This type of space improves mental health.", labels: likertLabels, required: true },
+
+      { prompt: "I feel calm alone at daytime in a place like this.", labels: likertLabels, required: true },
+      { prompt: "I feel calm alone at nighttime in a place like this.", labels: likertLabels, required: true },
+
+      { prompt: "This type of space brings enjoyment to my senses.", labels: likertLabels, required: true },
+      { prompt: "This type of environment is high-quality.", labels: likertLabels, required: true },
+
+      { prompt: "I feel attached to a place like this.", labels: likertLabels, required: true },
+      { prompt: "This type of space encourages me to socialize more.", labels: likertLabels, required: true }
+    ];
+  }
+
+  // ---------- main ----------
+  (async function main(){
+    try {
+      if (typeof initJsPsych === "undefined") {
+        throw new Error("jsPsych core not loaded. (initJsPsych undefined)");
+      }
+
+      const jsPsych = initJsPsych({
+        on_finish: () => {
+          const csv = jsPsych.data.get().csv();
+          downloadCSV(csv, `ugs_photo_experiment_${new Date().toISOString().replaceAll(':','-')}.csv`);
+        }
+      });
+
+      const stimuli = await loadStimuli();
+
+      // Pools (must match archetype strings in stimuli.json)
+      const pools = {
+        large_park: stimuli.filter(s => s.archetype === "large_park"),
+        linear_corridor: stimuli.filter(s => s.archetype === "linear_corridor"),
+        pocket_park: stimuli.filter(s => s.archetype === "pocket_park"),
+        edge_buffer: stimuli.filter(s => s.archetype === "edge_buffer")
+      };
+
+      for (const [k,v] of Object.entries(pools)) {
+        if (!v || v.length < 1) throw new Error(`No stimuli found for archetype: ${k}`);
+      }
+
+      // Draw 1 from each pool, shuffle order
+      const bundle = shuffle([
+        sampleOne(pools.large_park),
+        sampleOne(pools.linear_corridor),
+        sampleOne(pools.pocket_park),
+        sampleOne(pools.edge_buffer)
+      ]);
+
+      // Store bundle definition for reproducibility
+      jsPsych.data.addProperties({
+        bundle_image_ids: bundle.map(s => s.image_id).join("|"),
+        bundle_archetypes: bundle.map(s => s.archetype).join("|")
+      });
+
+      const timeline = [];
+
+      // Participant ID
+      timeline.push({
+        type: jsPsychSurveyText,
+        preamble: "<h3>Participant</h3><p>Please enter an ID (any code is fine for pilot tests).</p>",
+        questions: [{ prompt: "Participant ID", name: "participant_id", required: true }]
+      });
+
+      // Consent
+      timeline.push({
+        type: jsPsychHtmlButtonResponse,
+        stimulus: `
+          <h3>Consent</h3>
+          <p>You will view 4 images of urban greenspace and rate each one.</p>
+          <p>Your responses are anonymous. You may stop at any time.</p>
+          <p><strong>By clicking “I agree”, you consent to participate.</strong></p>
+        `,
+        choices: ["I agree", "I do not agree"],
+        on_finish: (data) => {
+          if (data.response === 1) jsPsych.endExperiment("You chose not to participate.");
+        }
+      });
+
+      // Instructions
+      timeline.push({
+        type: jsPsychHtmlButtonResponse,
+        stimulus: `
+          <h3>Instructions</h3>
+          <ul>
+            <li>You will see <strong>4</strong> images (one per greenspace archetype).</li>
+            <li>For each image, answer the same set of rating questions.</li>
+            <li>Please respond based on your immediate impression.</li>
+          </ul>
+          <p><em>Scale:</em> 1 = strongly disagree … 5 = strongly agree</p>
+        `,
+        choices: ["Start"]
+      });
+
+      // Trials: image -> likert
+      bundle.forEach((stim, i) => {
+        timeline.push({
+          type: jsPsychImageButtonResponse,
+          stimulus: stim.filepath,
+          stimulus_height: 420,
+          maintain_aspect_ratio: true,
+          prompt: `<p><strong>Image ${i+1} of 4</strong></p><p>Click “Continue” to rate this image.</p>`,
+          choices: ["Continue"],
+          data: {
+            phase: "image_view",
+            image_order: i + 1,
+            image_id: stim.image_id,
+            archetype: stim.archetype,
+            filepath: stim.filepath
+          }
+        });
+
+        timeline.push({
+          type: jsPsychSurveyLikert,
+          preamble: "<p><strong>Rate the image you just saw</strong></p>",
+          questions: buildLikertQuestions(),
+          randomize_question_order: false,
+          data: {
+            phase: "likert",
+            image_order: i + 1,
+            image_id: stim.image_id,
+            archetype: stim.archetype
+          }
+        });
+      });
+
+      // End
+      timeline.push({
+        type: jsPsychHtmlButtonResponse,
+        stimulus: "<h3>Thank you</h3><p>You have completed the survey. Your data will now download as a CSV.</p>",
+        choices: ["Finish"]
+      });
+
+      jsPsych.run(timeline);
+
+    } catch (err) {
+      showFatal("Fatal error:\n" + (err?.message || err));
+      console.error(err);
+    }
+  })();
+</script>
+</html>
